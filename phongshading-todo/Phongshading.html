@@ -1,0 +1,1614 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phong着色与纹理映射</title>
+    <style>
+        body { margin: 0; padding: 0; overflow: hidden; background: #000; }
+        #canvas { display: block; width: 100%; height: 100%; }
+        #info { 
+            position: absolute; top: 10px; left: 10px; 
+            color: white; background: rgba(0,0,0,0.8); 
+            padding: 15px; border-radius: 5px; 
+            z-index: 100;
+            font-size: 14px;
+        }
+        #controls { 
+            position: absolute; bottom: 20px; left: 20px; 
+            color: white; background: rgba(0,0,0,0.7); 
+            padding: 15px; border-radius: 5px; 
+            z-index: 100;
+            font-size: 12px;
+        }
+        #fileInput {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 100;
+            font-size: 12px;
+            max-width: 300px;
+        }
+        .textureInfo {
+            margin: 5px 0;
+            padding: 5px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 3px;
+        }
+        .success { color: #0f0; }
+        .warning { color: #ff0; }
+        .error { color: #f00; }
+        .key {
+            display: inline-block;
+            background: #333;
+            padding: 2px 6px;
+            margin: 2px;
+            border-radius: 3px;
+            border: 1px solid #666;
+        }
+        .face-button {
+            margin: 2px;
+            padding: 4px 8px;
+            background: #444;
+            border: 1px solid #666;
+            border-radius: 3px;
+            color: white;
+            cursor: pointer;
+        }
+        .face-button.selected {
+            background: #666;
+            border-color: #888;
+        }
+        .face-button:hover {
+            background: #555;
+        }
+        .face-list {
+            margin-top: 5px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        .face-item {
+            display: flex;
+            align-items: center;
+            margin: 2px 0;
+            padding: 2px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 2px;
+        }
+        .face-name {
+            flex: 1;
+            font-size: 11px;
+            margin-right: 5px;
+        }
+        .face-status {
+            font-size: 10px;
+        }
+        .remove-button {
+            margin-left: 5px;
+            padding: 1px 4px;
+            background: #f00;
+            border: none;
+            border-radius: 2px;
+            color: white;
+            cursor: pointer;
+            font-size: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <h3 style="margin: 0 0 10px 0;">Phong着色与纹理映射</h3>
+        <div id="status">
+            <p class="textureInfo">container纹理: <span id="containerStatus" class="warning">等待加载</span></p>
+            <p class="textureInfo">wood纹理: <span id="woodStatus" class="warning">等待加载</span></p>
+            <p class="textureInfo">skybox纹理: <span id="skyboxStatus" class="warning">等待加载</span></p>
+            <div id="skyboxFaces" style="margin-top: 5px; display: none;">
+                <div style="font-size: 12px; margin-bottom: 5px;">天空盒面:</div>
+                <div id="skyboxFaceList" class="face-list"></div>
+            </div>
+        </div>
+        <p>提示: 使用右上角的文件选择器加载纹理</p>
+    </div>
+    
+    <div id="fileInput">
+        <h4 style="margin: 0 0 10px 0;">加载纹理文件:</h4>
+        <div style="margin-bottom: 8px;">
+            <label>container.jpg: <br><input type="file" id="containerFile" accept=".jpg,.jpeg,.png,.bmp,.gif"></label>
+        </div>
+        <div style="margin-bottom: 8px;">
+            <label>wood.jpg: <br><input type="file" id="woodFile" accept=".jpg,.jpeg,.png,.bmp,.gif"></label>
+        </div>
+        <div>
+            <label>天空盒图片:</label><br>
+            <div style="margin: 5px 0;">
+                <div style="display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: 5px;">
+                    <button class="face-button" data-face="right">+X (右)</button>
+                    <button class="face-button" data-face="left">-X (左)</button>
+                    <button class="face-button" data-face="top">+Y (上)</button>
+                    <button class="face-button" data-face="bottom">-Y (下)</button>
+                    <button class="face-button" data-face="front">+Z (前)</button>
+                    <button class="face-button" data-face="back">-Z (后)</button>
+                </div>
+                <input type="file" id="skyboxFile" accept=".jpg,.jpeg,.png,.bmp,.gif" style="display: none;">
+                <div style="font-size: 11px; color: #aaa; margin-top: 5px;">
+                    点击上面的按钮选择对应面的图片
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="controls">
+        <h4 style="margin: 0 0 10px 0;">控制说明:</h4>
+        <p><span class="key">鼠标左键拖拽</span> - 旋转视角</p>
+        <p><span class="key">鼠标右键拖拽</span> - 缩放</p>
+        <p><span class="key">鼠标中键拖拽</span> - 平移场景</p>
+        <p><span class="key">WASD</span> - 移动光源</p>
+        <p><span class="key">C/V</span> - 点光源/平行光</p>
+        <p><span class="key">空格</span> - 重置场景</p>
+        <p><span class="key">I/K</span> - 调整视野</p>
+        <p><span class="key">J/L</span> - 旋转观察角度</p>
+        <p><span class="key">Y/U</span> - 调整光源距离</p>
+        <p><span class="key">M/N</span> - 调整投影角度</p>
+    </div>
+    
+    <canvas id="canvas"></canvas>
+
+    <script>
+        // 全局变量 
+        let canvas, gl;
+        let boxProgram, skyboxProgram, lampProgram, depthProgram;
+        
+        // 纹理对象
+        let textures = {
+            container: null,
+            wood: null,
+            skybox: null,
+            depth: null
+        };
+        
+        // 天空盒面数据
+        const skyboxFaces = [
+            { name: 'right', display: '+X (右)', index: 0, loaded: false, img: null },
+            { name: 'left', display: '-X (左)', index: 1, loaded: false, img: null },
+            { name: 'top', display: '+Y (上)', index: 2, loaded: false, img: null },
+            { name: 'bottom', display: '-Y (下)', index: 3, loaded: false, img: null },
+            { name: 'front', display: '+Z (前)', index: 4, loaded: false, img: null },
+            { name: 'back', display: '-Z (后)', index: 5, loaded: false, img: null }
+        ];
+        
+        let currentSkyboxFace = null;
+        
+        // 帧缓冲区对象
+        let framebuffer;
+        
+        // 缓冲区对象
+        let buffers = {};
+        let cubeNumPoints = 0, floorNumPoints = 0, skyboxNumPoints = 0, lampNumPoints = 0;
+        
+        // 变换矩阵
+        let modelMatrix, viewMatrix, projectionMatrix, lightSpaceMatrix;
+        
+        // 光源参数
+        let light = {
+            radius: 5.0,
+            theta: 0.0,
+            phi: 90.0,
+            type: 1.0, // 1=点光源, 0=平行光
+            position: [0, 0, 5, 1],
+            color: [1.0, 1.0, 1.0]
+        };
+        
+        // 相机参数
+        let camera = {
+            radius: 15.0,
+            theta: 0.0,
+            phi: 90.0,
+            fov: 55,
+            position: [0, 0, 15],
+            target: [0, 0, 0],
+            up: [0, 1, 0]
+        };
+        
+        // 材质参数
+        let material = {
+            ambientStrength: 0.5,
+            diffuseStrength: 0.5,
+            specularStrength: 0.5,
+            shininess: 100.0
+        };
+        
+        // 交互控制
+        let isLeftDragging = false;
+        let isMiddleDragging = false;
+        let isRightDragging = false;
+        let lastX = 0, lastY = 0;
+        let targetX = 0, targetY = 0, targetZ = 0;
+        
+        // 顶点数据
+        let points = [], normalsArray = [], texCoordsArray = [];
+
+        // 数学库函数 
+        function radians(degrees) {
+            return degrees * Math.PI / 180.0;
+        }
+
+        function vec3(x, y, z) {
+            if (arguments.length === 1 && Array.isArray(x)) {
+                return [x[0], x[1], x[2]];
+            }
+            return [x, y, z];
+        }
+
+        function vec4(x, y, z, w) {
+            if (arguments.length === 1 && Array.isArray(x)) {
+                return [x[0], x[1], x[2], x[3] || 1.0];
+            }
+            if (arguments.length === 3) {
+                return [x, y, z, 1.0];
+            }
+            return [x, y, z, w];
+        }
+
+        function mat4() {
+            if (arguments.length === 0) {
+                return [
+                    1, 0, 0, 0,
+                    0, 1, 0, 0,
+                    0, 0, 1, 0,
+                    0, 0, 0, 1
+                ];
+            }
+            return arguments[0];
+        }
+
+        function subtract(u, v) {
+            if (u.length !== v.length) {
+                throw new Error("向量长度不一致");
+            }
+            const result = [];
+            for (let i = 0; i < u.length; i++) {
+                result.push(u[i] - v[i]);
+            }
+            return result;
+        }
+
+        function normalize(v) {
+            const length = Math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+            if (length > 0) {
+                return [v[0]/length, v[1]/length, v[2]/length];
+            }
+            return [0, 0, 0];
+        }
+
+        function cross(u, v) {
+            return [
+                u[1] * v[2] - u[2] * v[1],
+                u[2] * v[0] - u[0] * v[2],
+                u[0] * v[1] - u[1] * v[0]
+            ];
+        }
+
+        function dot(u, v) {
+            let sum = 0;
+            for (let i = 0; i < u.length; i++) {
+                sum += u[i] * v[i];
+            }
+            return sum;
+        }
+
+        function lookAt(eye, at, up) {
+            const z = normalize(subtract(eye, at)); // 注意：这里应该是eye-at
+            const x = normalize(cross(up, z));
+            const y = cross(z, x);
+            
+            return [
+                x[0], y[0], z[0], 0,
+                x[1], y[1], z[1], 0,
+                x[2], y[2], z[2], 0,
+                -dot(x, eye), -dot(y, eye), -dot(z, eye), 1
+            ];
+        }
+
+        function perspective(fovy, aspect, near, far) {
+            const f = 1.0 / Math.tan(radians(fovy) / 2);
+            const d = far - near;
+            
+            return [
+                f / aspect, 0, 0, 0,
+                0, f, 0, 0,
+                0, 0, (near + far) / d, -1,
+                0, 0, (2 * near * far) / d, 0
+            ];
+        }
+
+        function translate(x, y, z) {
+            return [
+                1, 0, 0, x,
+                0, 1, 0, y,
+                0, 0, 1, z,
+                0, 0, 0, 1
+            ];
+        }
+
+        function scale(x, y, z) {
+            return [
+                x, 0, 0, 0,
+                0, y, 0, 0,
+                0, 0, z, 0,
+                0, 0, 0, 1
+            ];
+        }
+
+        function mult(u, v) {
+            if (typeof u === 'number' && Array.isArray(v)) {
+                return v.map(x => u * x);
+            }
+            
+            if (u.length === 16 && v.length === 4) {
+                // 矩阵4x4 * 向量4
+                const result = [0, 0, 0, 0];
+                for (let i = 0; i < 4; i++) {
+                    for (let j = 0; j < 4; j++) {
+                        result[i] += u[i*4 + j] * v[j];
+                    }
+                }
+                return result;
+            }
+            
+            if (u.length === 16 && v.length === 16) {
+                // 矩阵4x4 * 矩阵4x4
+                const result = new Array(16).fill(0);
+                for (let i = 0; i < 4; i++) {
+                    for (let j = 0; j < 4; j++) {
+                        for (let k = 0; k < 4; k++) {
+                            result[i*4 + j] += u[i*4 + k] * v[k*4 + j];
+                        }
+                    }
+                }
+                return result;
+            }
+            
+            throw new Error("不支持的乘法操作");
+        }
+
+        function flatten(v) {
+            if (Array.isArray(v[0])) {
+                const floats = [];
+                for (let i = 0; i < v.length; i++) {
+                    for (let j = 0; j < v[i].length; j++) {
+                        floats.push(v[i][j]);
+                    }
+                }
+                return new Float32Array(floats);
+            }
+            return new Float32Array(v);
+        }
+
+        // 初始化函数 
+        function init() {
+            try {
+                console.log('开始初始化...');
+                initWebGL();
+                initShaders();
+                initSceneData();
+                initTextures();
+                initFrameBuffer();
+                setupEventListeners();
+                
+                // 开始渲染循环
+                render();
+                
+                console.log('初始化完成');
+                
+            } catch (error) {
+                console.error('初始化失败:', error);
+                document.getElementById('containerStatus').textContent = '初始化失败: ' + error.message;
+                document.getElementById('containerStatus').className = 'error';
+            }
+        }
+
+        function initWebGL() {
+            canvas = document.getElementById('canvas');
+            
+            // 获取WebGL上下文
+            gl = canvas.getContext('webgl2');
+            if (!gl) {
+                gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+            }
+            
+            if (!gl) {
+                throw new Error('浏览器不支持WebGL');
+            }
+            
+            console.log('WebGL上下文创建成功');
+            
+            // 设置画布大小
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            
+            // 启用深度测试和面剔除
+            gl.enable(gl.DEPTH_TEST);
+            gl.depthFunc(gl.LEQUAL);
+            gl.clearColor(0.1, 0.1, 0.1, 1.0);
+        }
+
+        // 着色器代码 
+        // 顶点着色器 - 主场景
+        const boxVertexShaderSource = `#version 300 es
+            uniform mat4 u_ModelMatrix;
+            uniform mat4 u_ViewMatrix;
+            uniform mat4 u_ProjectionMatrix;
+            uniform mat4 u_LightSpaceMatrix;
+
+            in vec4 vPosition;
+            in vec4 vNormal;
+            in vec2 vTexCoord;
+
+            out vec2 TexCoord;
+            out vec3 FragPos;
+            out vec3 Normal;
+            out vec4 FragPosLightSpace;
+
+            void main() {
+                gl_Position = u_ProjectionMatrix * u_ViewMatrix * u_ModelMatrix * vPosition;
+                FragPos = vec3(u_ModelMatrix * vPosition);
+                Normal = mat3(transpose(inverse(mat3(u_ModelMatrix)))) * vNormal.xyz;
+                TexCoord = vTexCoord;
+                FragPosLightSpace = u_LightSpaceMatrix * vec4(FragPos, 1.0);
+            }
+        `;
+
+        // 片段着色器 - 主场景
+        const boxFragmentShaderSource = `#version 300 es
+            precision mediump float;
+
+            out vec4 FragColor;
+
+            uniform float ambientStrength;
+            uniform float specularStrength;
+            uniform float diffuseStrength;
+            uniform float shininess;
+
+            in vec3 Normal;
+            in vec3 FragPos;
+            in vec2 TexCoord;
+            in vec4 FragPosLightSpace;
+
+            uniform vec3 viewPos;
+            uniform vec4 u_lightPosition;
+            uniform vec3 lightColor;
+
+            uniform sampler2D diffuseTexture;
+            uniform sampler2D depthTexture;
+
+            float shadowCalculation(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir) {
+                // 执行透视除法
+                vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
+                // 变换到[0,1]范围
+                projCoords = projCoords * 0.5 + 0.5;
+                
+                if(projCoords.z > 1.0) {
+                    return 0.0;
+                }
+                
+                float closestDepth = texture(depthTexture, projCoords.xy).r;
+                float currentDepth = projCoords.z;
+                
+                float bias = max(0.05 * (1.0 - dot(normal, lightDir)), 0.005);
+                
+                float shadow = 0.0;
+                vec2 texelSize = 1.0 / vec2(textureSize(depthTexture, 0));
+                for(int x = -1; x <= 1; ++x) {
+                    for(int y = -1; y <= 1; ++y) {
+                        float pcfDepth = texture(depthTexture, projCoords.xy + vec2(x, y) * texelSize).r;
+                        shadow += currentDepth - bias > pcfDepth ? 1.0 : 0.0;
+                    }
+                }
+                shadow /= 9.0;
+                
+                return shadow;
+            }
+
+            void main() {
+                vec3 TextureColor = texture(diffuseTexture, TexCoord).rgb;
+
+                vec3 norm = normalize(Normal);
+                vec3 lightDir;
+                if(u_lightPosition.w == 1.0) {
+                    lightDir = normalize(u_lightPosition.xyz - FragPos);
+                } else {
+                    lightDir = normalize(-u_lightPosition.xyz);
+                }
+                vec3 viewDir = normalize(viewPos - FragPos);
+                vec3 reflectDir = reflect(-lightDir, norm);
+
+                // Phong光照模型
+                vec3 ambient = ambientStrength * lightColor;
+                float diff = max(dot(norm, lightDir), 0.0);
+                vec3 diffuse = diffuseStrength * diff * lightColor;
+                float spec = pow(max(dot(viewDir, reflectDir), 0.0), shininess);
+                vec3 specular = specularStrength * spec * lightColor;
+
+                vec3 lightReflectColor = (ambient + diffuse + specular);
+                float shadow = shadowCalculation(FragPosLightSpace, norm, lightDir);
+                vec3 resultColor = (1.0 - shadow) * lightReflectColor * TextureColor;
+                
+                FragColor = vec4(resultColor, 1.0);
+            }
+        `;
+
+        // 顶点着色器 - 天空盒
+        const skyboxVertexShaderSource = `#version 300 es
+            uniform mat4 u_ViewMatrix;
+            uniform mat4 u_ProjectionMatrix;
+            
+            in vec4 vPosition;
+            out vec3 TexCoord;
+            
+            void main() {
+                TexCoord = vPosition.xyz;
+                vec4 pos = u_ProjectionMatrix * u_ViewMatrix * vPosition;
+                gl_Position = pos.xyww;
+            }
+        `;
+
+        // 片段着色器 - 天空盒
+        const skyboxFragmentShaderSource = `#version 300 es
+            precision mediump float;
+            
+            in vec3 TexCoord;
+            out vec4 FragColor;
+            
+            uniform samplerCube cubeSampler;
+            
+            void main() {
+                FragColor = texture(cubeSampler, TexCoord);
+            }
+        `;
+
+        // 顶点着色器 - 光源
+        const lampVertexShaderSource = `#version 300 es
+            uniform mat4 u_ModelMatrix;
+            uniform mat4 u_ViewMatrix;
+            uniform mat4 u_ProjectionMatrix;
+            
+            in vec4 vPosition;
+            
+            void main() {
+                gl_Position = u_ProjectionMatrix * u_ViewMatrix * u_ModelMatrix * vPosition;
+            }
+        `;
+
+        // 片段着色器 - 光源
+        const lampFragmentShaderSource = `#version 300 es
+            precision mediump float;
+            
+            out vec4 FragColor;
+            uniform vec3 lightColor;
+            
+            void main() {
+                FragColor = vec4(lightColor, 1.0);
+            }
+        `;
+
+        // 顶点着色器 - 深度图
+        const depthVertexShaderSource = `#version 300 es
+            uniform mat4 u_LightSpaceMatrix;
+            uniform mat4 u_ModelMatrix;
+            
+            in vec4 vPosition;
+            
+            void main() {
+                gl_Position = u_LightSpaceMatrix * u_ModelMatrix * vPosition;
+            }
+        `;
+
+        // 片段着色器 - 深度图
+        const depthFragmentShaderSource = `#version 300 es
+            precision highp float;
+            
+            void main() {
+            }
+        `;
+
+        function initShaders() {
+            console.log('编译着色器...');
+            
+            function compileShader(type, source) {
+                const shader = gl.createShader(type);
+                gl.shaderSource(shader, source);
+                gl.compileShader(shader);
+                
+                if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                    const error = gl.getShaderInfoLog(shader);
+                    console.error('着色器编译失败:', error);
+                    gl.deleteShader(shader);
+                    return null;
+                }
+                
+                return shader;
+            }
+            
+            function createProgram(vertexSource, fragmentSource, name) {
+                const vertexShader = compileShader(gl.VERTEX_SHADER, vertexSource);
+                const fragmentShader = compileShader(gl.FRAGMENT_SHADER, fragmentSource);
+                
+                if (!vertexShader || !fragmentShader) {
+                    throw new Error(`${name}着色器编译失败`);
+                }
+                
+                const program = gl.createProgram();
+                gl.attachShader(program, vertexShader);
+                gl.attachShader(program, fragmentShader);
+                gl.linkProgram(program);
+                
+                if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                    const error = gl.getProgramInfoLog(program);
+                    throw new Error(`${name}程序链接失败: ${error}`);
+                }
+                
+                console.log(`${name}程序创建成功`);
+                return program;
+            }
+            
+            boxProgram = createProgram(boxVertexShaderSource, boxFragmentShaderSource, 'box');
+            skyboxProgram = createProgram(skyboxVertexShaderSource, skyboxFragmentShaderSource, 'skybox');
+            lampProgram = createProgram(lampVertexShaderSource, lampFragmentShaderSource, 'lamp');
+            depthProgram = createProgram(depthVertexShaderSource, depthFragmentShaderSource, 'depth');
+            
+            if (!boxProgram || !skyboxProgram || !lampProgram || !depthProgram) {
+                throw new Error('着色器程序创建失败');
+            }
+        }
+
+        // 场景数据初始化
+        function initSceneData() {
+            console.log('创建场景数据...');
+            
+            // 重置数据
+            points = [];
+            normalsArray = [];
+            texCoordsArray = [];
+            
+            // 生成几何体数据
+            cubeNumPoints = createCube(0.5);  // 减小立方体尺寸
+            floorNumPoints = createFloor(5.0);
+            skyboxNumPoints = createCube(100.0);  // 增大天空盒
+            lampNumPoints = createCube(0.1);
+            
+            console.log('场景数据创建完成');
+        }
+
+        function createCube(scale) {
+            const s = scale;
+            const vertices = [
+                // 前
+                [-s, -s, s, 1.0],
+                [s, -s, s, 1.0],
+                [s, s, s, 1.0],
+                [-s, s, s, 1.0],
+                // 后
+                [-s, -s, -s, 1.0],
+                [-s, s, -s, 1.0],
+                [s, s, -s, 1.0],
+                [s, -s, -s, 1.0],
+                // 上
+                [-s, s, -s, 1.0],
+                [-s, s, s, 1.0],
+                [s, s, s, 1.0],
+                [s, s, -s, 1.0],
+                // 下
+                [-s, -s, -s, 1.0],
+                [s, -s, -s, 1.0],
+                [s, -s, s, 1.0],
+                [-s, -s, s, 1.0],
+                // 右
+                [s, -s, -s, 1.0],
+                [s, s, -s, 1.0],
+                [s, s, s, 1.0],
+                [s, -s, s, 1.0],
+                // 左
+                [-s, -s, -s, 1.0],
+                [-s, -s, s, 1.0],
+                [-s, s, s, 1.0],
+                [-s, s, -s, 1.0]
+            ];
+
+            const normals = [
+                // 前
+                [0, 0, 1, 0],
+                [0, 0, 1, 0],
+                [0, 0, 1, 0],
+                [0, 0, 1, 0],
+                // 后
+                [0, 0, -1, 0],
+                [0, 0, -1, 0],
+                [0, 0, -1, 0],
+                [0, 0, -1, 0],
+                // 上
+                [0, 1, 0, 0],
+                [0, 1, 0, 0],
+                [0, 1, 0, 0],
+                [0, 1, 0, 0],
+                // 下
+                [0, -1, 0, 0],
+                [0, -1, 0, 0],
+                [0, -1, 0, 0],
+                [0, -1, 0, 0],
+                // 右
+                [1, 0, 0, 0],
+                [1, 0, 0, 0],
+                [1, 0, 0, 0],
+                [1, 0, 0, 0],
+                // 左
+                [-1, 0, 0, 0],
+                [-1, 0, 0, 0],
+                [-1, 0, 0, 0],
+                [-1, 0, 0, 0]
+            ];
+
+            const texCoords = [
+                // 每个面使用相同的纹理坐标
+                [0, 0], [1, 0], [1, 1], [0, 1], // 前
+                [0, 0], [1, 0], [1, 1], [0, 1], // 后
+                [0, 0], [1, 0], [1, 1], [0, 1], // 上
+                [0, 0], [1, 0], [1, 1], [0, 1], // 下
+                [0, 0], [1, 0], [1, 1], [0, 1], // 右
+                [0, 0], [1, 0], [1, 1], [0, 1]  // 左
+            ];
+
+            const indices = [
+                // 每个面由两个三角形组成
+                0, 1, 2, 0, 2, 3,    // 前
+                4, 5, 6, 4, 6, 7,    // 后
+                8, 9, 10, 8, 10, 11, // 上
+                12, 13, 14, 12, 14, 15, // 下
+                16, 17, 18, 16, 18, 19, // 右
+                20, 21, 22, 20, 22, 23  // 左
+            ];
+
+            for (let i = 0; i < indices.length; i++) {
+                const idx = indices[i];
+                points.push(vertices[idx]);
+                normalsArray.push(normals[idx]);
+                texCoordsArray.push(texCoords[idx]);
+            }
+
+            return indices.length;
+        }
+
+        function createFloor(scale) {
+            const s = scale;
+            
+            // 地板顶点
+            const vertices = [
+                [s, -1.0, s, 1.0],
+                [-s, -1.0, s, 1.0],
+                [-s, -1.0, -s, 1.0],
+                [s, -1.0, s, 1.0],
+                [-s, -1.0, -s, 1.0],
+                [s, -1.0, -s, 1.0]
+            ];
+
+            // 法向量向上
+            const normals = [
+                [0, 1, 0, 0],
+                [0, 1, 0, 0],
+                [0, 1, 0, 0],
+                [0, 1, 0, 0],
+                [0, 1, 0, 0],
+                [0, 1, 0, 0]
+            ];
+
+            // 纹理坐标，让纹理重复
+            const texCoords = [
+                [s, 0],
+                [0, 0],
+                [0, s],
+                [s, 0],
+                [0, s],
+                [s, s]
+            ];
+
+            for (let i = 0; i < 6; i++) {
+                points.push(vertices[i]);
+                normalsArray.push(normals[i]);
+                texCoordsArray.push(texCoords[i]);
+            }
+
+            return 6;
+        }
+
+        // 纹理处理 
+        function initTextures() {
+            console.log('初始化纹理...');
+            
+            createDefaultTextures();
+            updateSkyboxStatus();
+            loadLocalTextures();
+        }
+
+        function createDefaultTextures() {
+            textures.container = createDefaultTexture('container');
+            textures.wood = createDefaultTexture('wood');
+            textures.skybox = createDefaultSkybox();
+            
+            updateTextureStatus('container', '使用默认纹理');
+            updateTextureStatus('wood', '使用默认纹理');
+            updateTextureStatus('skybox', '使用默认纹理');
+        }
+
+        function createDefaultTexture(type) {
+            const texture = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+            
+            const size = 64;
+            const data = new Uint8Array(size * size * 4);
+            
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    const offset = (y * size + x) * 4;
+                    
+                    if (type === 'container') {
+                        // 红蓝棋盘纹理
+                        const pattern = (Math.floor(x / 8) % 2) ^ (Math.floor(y / 8) % 2);
+                        data[offset] = pattern ? 255 : 100;
+                        data[offset + 1] = 50;
+                        data[offset + 2] = pattern ? 100 : 255;
+                    } else {
+                        // 木纹纹理
+                        const woodPattern = Math.sin(x * 0.1) * Math.cos(y * 0.1);
+                        data[offset] = 180 + woodPattern * 40;
+                        data[offset + 1] = 120 + woodPattern * 20;
+                        data[offset + 2] = 60 + woodPattern * 10;
+                    }
+                    data[offset + 3] = 255;
+                }
+            }
+            
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+            gl.generateMipmap(gl.TEXTURE_2D);
+            
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+            
+            return texture;
+        }
+
+        function createDefaultSkybox() {
+            const texture = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_CUBE_MAP, texture);
+            
+            const size = 32;
+            const data = new Uint8Array(size * size * 4);
+            
+            const faceColors = [
+                [200, 100, 100], // +X 红色
+                [100, 200, 100], // -X 绿色
+                [100, 100, 200], // +Y 蓝色
+                [200, 200, 100], // -Y 黄色
+                [200, 100, 200], // +Z 紫色
+                [100, 200, 200]  // -Z 青色
+            ];
+            
+            for (let face = 0; face < 6; face++) {
+                for (let y = 0; y < size; y++) {
+                    for (let x = 0; x < size; x++) {
+                        const offset = (y * size + x) * 4;
+                        const color = faceColors[face];
+                        
+                        const gradient = (x + y) / (size * 2);
+                        data[offset] = color[0] * (0.7 + 0.3 * gradient);
+                        data[offset + 1] = color[1] * (0.7 + 0.3 * gradient);
+                        data[offset + 2] = color[2] * (0.7 + 0.3 * gradient);
+                        data[offset + 3] = 255;
+                    }
+                }
+                
+                gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_X + face, 0, 
+                            gl.RGBA, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+            }
+            
+            gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
+            
+            return texture;
+        }
+
+        function loadLocalTextures() {
+            const basePath = '';
+            
+            loadTextureFromURL(`${basePath}container.jpg`, 'container')
+                .catch(() => loadTextureFromURL(`${basePath}container.png`, 'container'))
+                .catch(() => console.log('本地container纹理加载失败，使用默认纹理'));
+            
+            loadTextureFromURL(`${basePath}wood.jpg`, 'wood')
+                .catch(() => loadTextureFromURL(`${basePath}wood.png`, 'wood'))
+                .catch(() => console.log('本地wood纹理加载失败，使用默认纹理'));
+        }
+
+        function loadTextureFromURL(url, textureName) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                
+                img.onload = function() {
+                    console.log(`加载${textureName}纹理成功: ${url}`);
+                    
+                    const texture = gl.createTexture();
+                    gl.bindTexture(gl.TEXTURE_2D, texture);
+                    
+                    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+                    gl.generateMipmap(gl.TEXTURE_2D);
+                    
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+                    
+                    textures[textureName] = texture;
+                    updateTextureStatus(textureName, `已加载 (${img.width}x${img.height})`);
+                    
+                    resolve(texture);
+                };
+                
+                img.onerror = function() {
+                    console.log(`无法加载${textureName}纹理: ${url}`);
+                    reject(new Error(`无法加载${textureName}纹理`));
+                };
+                
+                img.src = url;
+            });
+        }
+
+        // 更新天空盒状态显示
+        function updateSkyboxStatus() {
+            const loadedCount = skyboxFaces.filter(face => face.loaded).length;
+            const totalCount = skyboxFaces.length;
+            
+            if (loadedCount === totalCount) {
+                updateTextureStatus('skybox', `已加载 (${loadedCount}/${totalCount})`);
+            } else if (loadedCount > 0) {
+                updateTextureStatus('skybox', `部分加载 (${loadedCount}/${totalCount})`);
+            } else {
+                updateTextureStatus('skybox', '使用默认纹理');
+            }
+            
+            updateSkyboxFaceList();
+        }
+
+        function updateSkyboxFaceList() {
+            const faceListElement = document.getElementById('skyboxFaceList');
+            const skyboxFacesElement = document.getElementById('skyboxFaces');
+            
+            if (!faceListElement) return;
+            
+            faceListElement.innerHTML = '';
+            
+            skyboxFaces.forEach(face => {
+                const faceItem = document.createElement('div');
+                faceItem.className = 'face-item';
+                
+                const faceName = document.createElement('div');
+                faceName.className = 'face-name';
+                faceName.textContent = face.display;
+                
+                const faceStatus = document.createElement('div');
+                faceStatus.className = 'face-status';
+                faceStatus.textContent = face.loaded ? '✓ 已加载' : '✗ 未加载';
+                faceStatus.style.color = face.loaded ? '#0f0' : '#f00';
+                
+                const removeButton = document.createElement('button');
+                removeButton.className = 'remove-button';
+                removeButton.textContent = '×';
+                removeButton.title = '移除';
+                removeButton.onclick = () => removeSkyboxFace(face.name);
+                
+                faceItem.appendChild(faceName);
+                faceItem.appendChild(faceStatus);
+                if (face.loaded) {
+                    faceItem.appendChild(removeButton);
+                }
+                
+                faceListElement.appendChild(faceItem);
+            });
+            
+            skyboxFacesElement.style.display = skyboxFaces.some(face => face.loaded) ? 'block' : 'none';
+        }
+
+        function removeSkyboxFace(faceName) {
+            const face = skyboxFaces.find(f => f.name === faceName);
+            if (!face) return;
+            
+            face.loaded = false;
+            face.img = null;
+            
+            if (textures.skybox) {
+                updateSkyboxTexture();
+            }
+            
+            updateSkyboxStatus();
+        }
+
+        function updateSkyboxTexture() {
+            if (!textures.skybox) {
+                textures.skybox = gl.createTexture();
+            }
+            
+            gl.bindTexture(gl.TEXTURE_CUBE_MAP, textures.skybox);
+            
+            // 先使用默认数据
+            const size = 32;
+            const defaultData = new Uint8Array(size * size * 4);
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    const offset = (y * size + x) * 4;
+                    defaultData[offset] = 100;
+                    defaultData[offset + 1] = 100;
+                    defaultData[offset + 2] = 100;
+                    defaultData[offset + 3] = 255;
+                }
+            }
+            
+            for (let i = 0; i < 6; i++) {
+                gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, 
+                            gl.RGBA, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, defaultData);
+            }
+            
+            // 更新已加载的面
+            skyboxFaces.forEach(face => {
+                if (face.loaded && face.img) {
+                    gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_X + face.index, 0, 
+                                gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, face.img);
+                }
+            });
+            
+            gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
+        }
+
+        function updateTextureStatus(name, message) {
+            const element = document.getElementById(`${name}Status`);
+            if (element) {
+                element.textContent = message;
+                element.className = message.includes('失败') ? 'error' : 
+                                   message.includes('默认') ? 'warning' : 'success';
+            }
+        }
+
+        //  帧缓冲区初始化
+        function initFrameBuffer() {
+            console.log('初始化帧缓冲区...');
+            
+            const depthTextureSize = 1024;
+            
+            textures.depth = gl.createTexture();
+            gl.activeTexture(gl.TEXTURE2);
+            gl.bindTexture(gl.TEXTURE_2D, textures.depth);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT32F, 
+                         depthTextureSize, depthTextureSize, 0, 
+                         gl.DEPTH_COMPONENT, gl.FLOAT, null);
+            
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            
+            framebuffer = gl.createFramebuffer();
+            gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+            
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, 
+                                   gl.TEXTURE_2D, textures.depth, 0);
+            
+            const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+            if (status !== gl.FRAMEBUFFER_COMPLETE) {
+                console.error('帧缓冲区不完整:', status);
+            }
+            
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        }
+
+        // 事件处理 
+        function setupEventListeners() {
+            console.log('设置事件监听器...');
+            
+            document.getElementById('containerFile').addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    loadTextureFromFile(file, 'container');
+                }
+            });
+            
+            document.getElementById('woodFile').addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    loadTextureFromFile(file, 'wood');
+                }
+            });
+            
+            document.querySelectorAll('.face-button').forEach(button => {
+                button.addEventListener('click', function() {
+                    const faceName = this.dataset.face;
+                    selectSkyboxFace(faceName);
+                });
+            });
+            
+            document.getElementById('skyboxFile').addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (file && currentSkyboxFace) {
+                    loadSkyboxFaceFromFile(file, currentSkyboxFace);
+                }
+                this.value = '';
+            });
+            
+            canvas.addEventListener('mousedown', function(e) {
+                lastX = e.clientX;
+                lastY = e.clientY;
+                
+                if (e.button === 0) isLeftDragging = true;
+                if (e.button === 1) isMiddleDragging = true;
+                if (e.button === 2) isRightDragging = true;
+                
+                e.preventDefault();
+            });
+            
+            document.addEventListener('mouseup', function() {
+                isLeftDragging = false;
+                isMiddleDragging = false;
+                isRightDragging = false;
+            });
+            
+            canvas.addEventListener('mousemove', function(e) {
+                const dx = e.clientX - lastX;
+                const dy = e.clientY - lastY;
+                
+                if (isLeftDragging) {
+                    const rotateSpeed = 0.3;
+                    camera.theta -= dx * rotateSpeed;
+                    camera.phi -= dy * rotateSpeed;
+                    camera.phi = Math.max(10, Math.min(170, camera.phi));
+                }
+                
+                if (isMiddleDragging) {
+                    const panSpeed = 0.001 * camera.radius;
+                    targetX -= dx * panSpeed;
+                    targetY += dy * panSpeed;
+                }
+                
+                if (isRightDragging) {
+                    const zoomSpeed = 0.05;
+                    camera.radius += dy * zoomSpeed;
+                    camera.radius = Math.max(1.0, Math.min(50.0, camera.radius));
+                }
+                
+                lastX = e.clientX;
+                lastY = e.clientY;
+            });
+            
+            canvas.addEventListener('contextmenu', function(e) {
+                e.preventDefault();
+                return false;
+            });
+            
+            document.addEventListener('keydown', function(e) {
+                const key = e.key.toLowerCase();
+                
+                switch (key) {
+                    case ' ':
+                        initParameters();
+                        break;
+                    case 'c':
+                        light.type = 1.0;
+                        updateLightPosition();
+                        break;
+                    case 'v':
+                        light.type = 0.0;
+                        updateLightPosition();
+                        break;
+                    case 'y':
+                        light.radius += 0.5;
+                        updateLightPosition();
+                        break;
+                    case 'u':
+                        light.radius = Math.max(0, light.radius - 0.5);
+                        updateLightPosition();
+                        break;
+                    case 'w':
+                        light.phi -= 1;
+                        updateLightPosition();
+                        break;
+                    case 's':
+                        light.phi += 1;
+                        updateLightPosition();
+                        break;
+                    case 'a':
+                        light.theta -= 1;
+                        updateLightPosition();
+                        break;
+                    case 'd':
+                        light.theta += 1;
+                        updateLightPosition();
+                        break;
+                    case 'm':
+                        camera.fov += 5;
+                        break;
+                    case 'n':
+                        camera.fov -= 5;
+                        break;
+                    case 'i':
+                        camera.phi -= 5;
+                        break;
+                    case 'k':
+                        camera.phi += 5;
+                        break;
+                    case 'j':
+                        camera.theta -= 5;
+                        break;
+                    case 'l':
+                        camera.theta += 5;
+                        break;
+                    case ',':
+                        camera.radius -= 1;
+                        break;
+                    case '.':
+                        camera.radius += 1;
+                        break;
+                }
+            });
+            
+            window.addEventListener('resize', function() {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+                gl.viewport(0, 0, canvas.width, canvas.height);
+            });
+        }
+
+        function selectSkyboxFace(faceName) {
+            currentSkyboxFace = faceName;
+            
+            document.querySelectorAll('.face-button').forEach(button => {
+                if (button.dataset.face === faceName) {
+                    button.classList.add('selected');
+                } else {
+                    button.classList.remove('selected');
+                }
+            });
+            
+            document.getElementById('skyboxFile').click();
+        }
+
+        function loadTextureFromFile(file, textureName) {
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                const img = new Image();
+                
+                img.onload = function() {
+                    const texture = gl.createTexture();
+                    gl.bindTexture(gl.TEXTURE_2D, texture);
+                    
+                    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+                    gl.generateMipmap(gl.TEXTURE_2D);
+                    
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+                    
+                    textures[textureName] = texture;
+                    updateTextureStatus(textureName, `已加载 (${img.width}x${img.height})`);
+                    
+                    console.log(`${textureName}纹理从文件加载成功`);
+                };
+                
+                img.src = e.target.result;
+            };
+            
+            reader.readAsDataURL(file);
+        }
+
+        function loadSkyboxFaceFromFile(file, faceName) {
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                const img = new Image();
+                
+                img.onload = function() {
+                    const face = skyboxFaces.find(f => f.name === faceName);
+                    if (face) {
+                        face.loaded = true;
+                        face.img = img;
+                        
+                        updateSkyboxTexture();
+                        updateSkyboxStatus();
+                        
+                        console.log(`天空盒面 ${face.display} 加载成功: ${img.width}x${img.height}`);
+                    }
+                };
+                
+                img.onerror = function() {
+                    console.error(`无法加载天空盒面 ${faceName} 的图片`);
+                    alert(`无法加载图片: ${file.name}`);
+                };
+                
+                img.src = e.target.result;
+            };
+            
+            reader.onerror = function() {
+                console.error(`无法读取文件: ${file.name}`);
+                alert(`无法读取文件: ${file.name}`);
+            };
+            
+            reader.readAsDataURL(file);
+        }
+
+        // 参数初始化 
+        function initParameters() {
+            console.log('初始化参数...');
+            
+            light.radius = 5.0;
+            light.theta = 0.0;
+            light.phi = 90.0;
+            light.type = 1.0;
+            updateLightPosition();
+            
+            camera.radius = 15.0;
+            camera.theta = 0.0;
+            camera.phi = 90.0;
+            camera.fov = 55;
+            
+            targetX = targetY = targetZ = 0;
+            
+            modelMatrix = mat4();
+            viewMatrix = mat4();
+            projectionMatrix = mat4();
+        }
+
+        function updateLightPosition() {
+            const phiRad = radians(light.phi);
+            const thetaRad = radians(light.theta);
+            
+            light.position[0] = light.radius * Math.sin(phiRad) * Math.sin(thetaRad);
+            light.position[1] = light.radius * Math.cos(phiRad);
+            light.position[2] = light.radius * Math.sin(phiRad) * Math.cos(thetaRad);
+            light.position[3] = light.type;
+        }
+
+        // 渲染函数 
+        function render() {
+            if (!gl) return;
+            
+            updateLightPosition();
+            
+            // 计算相机位置
+            const phiRad = radians(camera.phi);
+            const thetaRad = radians(camera.theta);
+            
+            camera.position[0] = targetX + camera.radius * Math.sin(phiRad) * Math.sin(thetaRad);
+            camera.position[1] = targetY + camera.radius * Math.cos(phiRad);
+            camera.position[2] = targetZ + camera.radius * Math.sin(phiRad) * Math.cos(thetaRad);
+            
+            // 计算视图矩阵
+            viewMatrix = lookAt(camera.position, [targetX, targetY, targetZ], camera.up);
+            
+            // 计算投影矩阵
+            const aspect = canvas.width / canvas.height;
+            projectionMatrix = perspective(camera.fov, aspect, 0.1, 1000);
+            
+            // 1. 渲染深度图
+            renderDepthMap();
+            
+            // 2. 清屏
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+            
+            // 3. 渲染天空盒
+            renderSkybox();
+            
+            // 4. 渲染主场景
+            renderMainScene();
+            
+            // 5. 渲染光源
+            renderLight();
+            
+            requestAnimationFrame(render);
+        }
+
+        function renderDepthMap() {
+            gl.useProgram(depthProgram);
+            
+            gl.viewport(0, 0, 1024, 1024);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+            gl.clear(gl.DEPTH_BUFFER_BIT);
+            
+            const lightProjection = perspective(155.0, 1.0, 0.1, 100);
+            const lightView = lookAt(light.position.slice(0, 3), [0, 0, 0], [0, 1, 0]);
+            lightSpaceMatrix = mult(lightProjection, lightView);
+            
+            const lightSpaceMatrixLoc = gl.getUniformLocation(depthProgram, 'u_LightSpaceMatrix');
+            const modelMatrixLoc = gl.getUniformLocation(depthProgram, 'u_ModelMatrix');
+            
+            gl.uniformMatrix4fv(lightSpaceMatrixLoc, false, flatten(lightSpaceMatrix));
+            
+            // 渲染立方体
+            gl.uniformMatrix4fv(modelMatrixLoc, false, flatten(mat4()));
+            
+            const vao = createVertexArray();
+            gl.bindVertexArray(vao);
+            gl.drawArrays(gl.TRIANGLES, 0, cubeNumPoints);
+            
+            // 渲染地板
+            const translateMatrix = translate(0, -1.5, 0);
+            const scaleMatrix = scale(10, 0.1, 10);
+            const floorModelMatrix = mult(translateMatrix, scaleMatrix);
+            
+            gl.uniformMatrix4fv(modelMatrixLoc, false, flatten(floorModelMatrix));
+            gl.drawArrays(gl.TRIANGLES, cubeNumPoints, floorNumPoints);
+            
+            gl.bindVertexArray(null);
+        }
+
+        function createVertexArray() {
+            const vao = gl.createVertexArray();
+            gl.bindVertexArray(vao);
+            
+            // 位置
+            const positionBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, flatten(points), gl.STATIC_DRAW);
+            gl.vertexAttribPointer(0, 4, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(0);
+            
+            if (gl.getProgramParameter(boxProgram, gl.ACTIVE_ATTRIBUTES) >= 3) {
+                // 法线
+                const normalBuffer = gl.createBuffer();
+                gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+                gl.bufferData(gl.ARRAY_BUFFER, flatten(normalsArray), gl.STATIC_DRAW);
+                gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
+                gl.enableVertexAttribArray(1);
+                
+                // 纹理坐标
+                const texCoordBuffer = gl.createBuffer();
+                gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+                gl.bufferData(gl.ARRAY_BUFFER, flatten(texCoordsArray), gl.STATIC_DRAW);
+                gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 0, 0);
+                gl.enableVertexAttribArray(2);
+            }
+            
+            return vao;
+        }
+
+        function renderSkybox() {
+            gl.useProgram(skyboxProgram);
+            gl.depthFunc(gl.LEQUAL);
+            
+            const viewLoc = gl.getUniformLocation(skyboxProgram, 'u_ViewMatrix');
+            const projLoc = gl.getUniformLocation(skyboxProgram, 'u_ProjectionMatrix');
+            const samplerLoc = gl.getUniformLocation(skyboxProgram, 'cubeSampler');
+            
+            // 移除天空盒视图矩阵的平移部分
+            const skyboxView = [...viewMatrix];
+            skyboxView[12] = skyboxView[13] = skyboxView[14] = 0;
+            skyboxView[15] = 1.0;
+            
+            gl.uniformMatrix4fv(viewLoc, false, flatten(skyboxView));
+            gl.uniformMatrix4fv(projLoc, false, flatten(projectionMatrix));
+            
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_CUBE_MAP, textures.skybox);
+            gl.uniform1i(samplerLoc, 0);
+            
+            const vao = createVertexArray();
+            gl.bindVertexArray(vao);
+            gl.drawArrays(gl.TRIANGLES, cubeNumPoints + floorNumPoints, skyboxNumPoints);
+            gl.bindVertexArray(null);
+            
+            gl.depthFunc(gl.LESS);
+        }
+
+        function renderMainScene() {
+            gl.useProgram(boxProgram);
+            
+            const modelLoc = gl.getUniformLocation(boxProgram, 'u_ModelMatrix');
+            const viewLoc = gl.getUniformLocation(boxProgram, 'u_ViewMatrix');
+            const projLoc = gl.getUniformLocation(boxProgram, 'u_ProjectionMatrix');
+            const lightSpaceLoc = gl.getUniformLocation(boxProgram, 'u_LightSpaceMatrix');
+            const lightPosLoc = gl.getUniformLocation(boxProgram, 'u_lightPosition');
+            const viewPosLoc = gl.getUniformLocation(boxProgram, 'viewPos');
+            const lightColorLoc = gl.getUniformLocation(boxProgram, 'lightColor');
+            const diffuseTexLoc = gl.getUniformLocation(boxProgram, 'diffuseTexture');
+            const depthTexLoc = gl.getUniformLocation(boxProgram, 'depthTexture');
+            
+            const ambientStrLoc = gl.getUniformLocation(boxProgram, 'ambientStrength');
+            const diffuseStrLoc = gl.getUniformLocation(boxProgram, 'diffuseStrength');
+            const specularStrLoc = gl.getUniformLocation(boxProgram, 'specularStrength');
+            const shininessLoc = gl.getUniformLocation(boxProgram, 'shininess');
+            
+            // 设置变换矩阵
+            gl.uniformMatrix4fv(modelLoc, false, flatten(mat4()));
+            gl.uniformMatrix4fv(viewLoc, false, flatten(viewMatrix));
+            gl.uniformMatrix4fv(projLoc, false, flatten(projectionMatrix));
+            gl.uniformMatrix4fv(lightSpaceLoc, false, flatten(lightSpaceMatrix));
+            
+            // 设置光源和相机参数
+            gl.uniform4fv(lightPosLoc, flatten(light.position));
+            gl.uniform3fv(viewPosLoc, flatten(camera.position));
+            gl.uniform3fv(lightColorLoc, flatten(light.color));
+            
+            // 设置材质参数
+            gl.uniform1f(ambientStrLoc, material.ambientStrength);
+            gl.uniform1f(diffuseStrLoc, material.diffuseStrength);
+            gl.uniform1f(specularStrLoc, material.specularStrength);
+            gl.uniform1f(shininessLoc, material.shininess);
+            
+            // 绑定纹理并渲染立方体
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, textures.container);
+            gl.uniform1i(diffuseTexLoc, 0);
+            
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, textures.depth);
+            gl.uniform1i(depthTexLoc, 1);
+            
+            const vao = createVertexArray();
+            gl.bindVertexArray(vao);
+            gl.drawArrays(gl.TRIANGLES, 0, cubeNumPoints);
+            
+            // 渲染地板
+            const translateMatrix = translate(0, -1.5, 0);
+            const scaleMatrix = scale(10, 0.1, 10);
+            const floorModelMatrix = mult(translateMatrix, scaleMatrix);
+            
+            gl.uniformMatrix4fv(modelLoc, false, flatten(floorModelMatrix));
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, textures.wood);
+            gl.uniform1i(diffuseTexLoc, 0);
+            
+            gl.drawArrays(gl.TRIANGLES, cubeNumPoints, floorNumPoints);
+            
+            gl.bindVertexArray(null);
+        }
+
+        function renderLight() {
+            gl.useProgram(lampProgram);
+            
+            const modelLoc = gl.getUniformLocation(lampProgram, 'u_ModelMatrix');
+            const viewLoc = gl.getUniformLocation(lampProgram, 'u_ViewMatrix');
+            const projLoc = gl.getUniformLocation(lampProgram, 'u_ProjectionMatrix');
+            const lightColorLoc = gl.getUniformLocation(lampProgram, 'lightColor');
+            
+            gl.uniformMatrix4fv(viewLoc, false, flatten(viewMatrix));
+            gl.uniformMatrix4fv(projLoc, false, flatten(projectionMatrix));
+            gl.uniform3fv(lightColorLoc, flatten(light.color));
+            
+            const lightModelMatrix = translate(light.position[0], light.position[1], light.position[2]);
+            gl.uniformMatrix4fv(modelLoc, false, flatten(lightModelMatrix));
+            
+            const vao = createVertexArray();
+            gl.bindVertexArray(vao);
+            gl.drawArrays(gl.TRIANGLES, cubeNumPoints + floorNumPoints + skyboxNumPoints, lampNumPoints);
+            gl.bindVertexArray(null);
+        }
+
+        // 启动
+        window.addEventListener('load', function() {
+            initParameters();
+            init();
+        });
+    </script>
+</body>
+</html>
